@@ -1,0 +1,7 @@
+# Example .scarlet.yml for a Vite + React project (single package).
+
+project_type: vite
+state_management: zustand
+test_framework: vitest
+features_root: src/features
+barrel_export_strategy: re_export_default

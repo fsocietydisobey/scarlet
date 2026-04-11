@@ -1,0 +1,7 @@
+# Example .scarlet.yml for a Python FastAPI project organized by feature.
+
+project_type: fastapi
+state_management: null
+test_framework: pytest
+features_root: src/app/features
+barrel_export_strategy: re_export_default

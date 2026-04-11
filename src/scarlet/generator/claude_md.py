@@ -252,17 +252,25 @@ def _find_consumers(project_path: Path, feature_name: str) -> list[tuple[str, li
     """Find all features that import from the given feature.
 
     Returns a list of (consumer_feature_name, list_of_files).
+    Files are returned as paths relative to the consumer feature root.
     """
     graph = build_feature_graph(project_path)
 
-    # Build a reverse map: target → list of (source_feature, source_files)
     consumers_by_feature: dict[str, list[str]] = {}
 
-    # The graph only has feature-level edges; for files we'd need a richer walk.
-    # For now, surface the consumer feature names. File-level breakdown can be
-    # added by re-walking each consumer feature's imports if needed.
-    for from_feature, to_feature in graph.edges:
-        if to_feature == feature_name:
-            consumers_by_feature.setdefault(from_feature, [])
+    for (from_feature, to_feature), files in graph.edge_files.items():
+        if to_feature != feature_name:
+            continue
 
-    return [(name, files) for name, files in consumers_by_feature.items()]
+        # Make file paths relative to the project root for readability
+        rel_files: list[str] = []
+        for f in files:
+            try:
+                rel = Path(f).relative_to(project_path)
+                rel_files.append(str(rel))
+            except ValueError:
+                rel_files.append(f)
+
+        consumers_by_feature[from_feature] = sorted(rel_files)
+
+    return sorted(consumers_by_feature.items())

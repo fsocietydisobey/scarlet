@@ -86,20 +86,83 @@ def analyze_project(project_path: Path) -> ProjectManifest:
 
 
 def _read_package_json(project_path: Path) -> dict | None:
-    """Read package.json from project root, or any frontend/ subdirectory."""
-    candidates = [
-        project_path / "package.json",
-        project_path / "frontend" / "package.json",
-        project_path / "client" / "package.json",
-        project_path / "web" / "package.json",
-    ]
-    for candidate in candidates:
+    """Read and merge all package.jsons in a project (handles workspace setups).
+
+    Walks up to 2 levels deep, skipping node_modules. Merges dependencies
+    and devDependencies from every package.json found. This handles:
+      - Single-package projects (one package.json at root)
+      - Workspace setups (root package.json + frontend/package.json + ...)
+      - Monorepos (multiple sibling package.jsons)
+
+    The merged result lets detection logic see the union of all deps,
+    so a project with `next` in `frontend/package.json` is correctly
+    identified as a Next.js project even if the root has other things.
+    """
+    package_jsons = _find_all_package_jsons(project_path)
+    if not package_jsons:
+        return None
+
+    merged: dict = {"dependencies": {}, "devDependencies": {}, "scripts": {}}
+
+    for pj in package_jsons:
+        try:
+            data = json.loads(pj.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        merged["dependencies"].update(data.get("dependencies", {}))
+        merged["devDependencies"].update(data.get("devDependencies", {}))
+        merged["scripts"].update(data.get("scripts", {}))
+
+        # Preserve top-level fields from the first one we see
+        for key in ("name", "version", "type", "workspaces"):
+            if key in data and key not in merged:
+                merged[key] = data[key]
+
+    return merged
+
+
+def _find_all_package_jsons(project_path: Path, max_depth: int = 2) -> list[Path]:
+    """Find all package.json files in a project, skipping node_modules.
+
+    Walks up to max_depth directories deep. The root package.json is
+    always included if present.
+    """
+    found: list[Path] = []
+
+    root_pj = project_path / "package.json"
+    if root_pj.exists():
+        found.append(root_pj)
+
+    # Walk subdirectories at depth 1 and 2
+    for child in project_path.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name in {"node_modules", ".git", ".next", "dist", "build"}:
+            continue
+        if child.name.startswith("."):
+            continue
+
+        candidate = child / "package.json"
         if candidate.exists():
+            found.append(candidate)
+
+        if max_depth > 1:
             try:
-                return json.loads(candidate.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
+                for grandchild in child.iterdir():
+                    if not grandchild.is_dir():
+                        continue
+                    if grandchild.name in {"node_modules", ".git"}:
+                        continue
+                    if grandchild.name.startswith("."):
+                        continue
+                    nested = grandchild / "package.json"
+                    if nested.exists():
+                        found.append(nested)
+            except (OSError, PermissionError):
                 continue
-    return None
+
+    return found
 
 
 def _read_pyproject(project_path: Path) -> str | None:

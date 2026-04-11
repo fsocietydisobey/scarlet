@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from scarlet.analyzer.features import scan_features as _scan_features
 from scarlet.analyzer.imports import build_feature_graph
+from scarlet.analyzer.invariants import extract_invariants as _extract_invariants
 from scarlet.analyzer.metadata import extract_feature_metadata as _extract_metadata
 from scarlet.analyzer.project import analyze_project as _analyze_project
 from scarlet.generator.barrel import generate_barrel as _generate_barrel
@@ -209,6 +210,34 @@ def lint_claude_md(feature_path: str) -> dict:
         return {"error": f"Directory not found: {feature_path}"}
 
     report = lint_feature_claude_md(fp)
+    return report.to_dict()
+
+
+@mcp.tool()
+def extract_invariants(feature_path: str) -> dict:
+    """Scan a feature for invariant candidates worth documenting as gotchas.
+
+    Heuristically surfaces:
+      - Warning comments (DON'T, NEVER, FIXME, HACK)
+      - Intentional callouts ("intentional", "deliberate", "by design")
+      - Magic numbers with explanatory comments (e.g. `600ms // ...`)
+      - TODO markers
+
+    These are SUGGESTIONS only — Scarlet does not decide what's important.
+    Use this output as raw material when filling in the gotchas section
+    of a feature's CLAUDE.md.
+
+    Args:
+        feature_path: Absolute path to the feature directory.
+
+    Returns:
+        Categorized invariant candidates with file paths and line numbers.
+    """
+    fp = Path(feature_path).resolve()
+    if not fp.is_dir():
+        return {"error": f"Directory not found: {feature_path}"}
+
+    report = _extract_invariants(fp)
     return report.to_dict()
 
 

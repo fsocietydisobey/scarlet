@@ -1,0 +1,25 @@
+# Example .scarlet.yml for a Next.js monorepo with feature-based frontend.
+# Drop this at the project root as `.scarlet.yml` to override Scarlet's
+# default detection.
+
+project_type: nextjs
+state_management: redux-toolkit
+test_framework: jest
+features_root: frontend/src/features
+study_guides_path: frontend/study-guides
+barrel_export_strategy: re_export_default
+
+# Optional: provide a custom CLAUDE.md template.
+# Remove this section to use Scarlet's default template.
+#
+# claude_md_template: |
+#   # Feature: {feature_name}
+#
+#   <!-- BEGIN MANUAL: description -->
+#   ...
+#   <!-- END MANUAL: description -->
+#
+#   ## Public API (import from `@/features/{feature_name}`)
+#   <!-- BEGIN AUTO: public_api -->
+#   {public_api}
+#   <!-- END AUTO: public_api -->

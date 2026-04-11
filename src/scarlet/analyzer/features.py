@@ -92,9 +92,9 @@ def _summarize_feature(feature_dir: Path) -> FeatureSummary:
     barrel_path = _find_barrel(feature_dir)
     has_barrel = barrel_path is not None
 
-    component_count = _count_in_subdirs(feature_dir, COMPONENT_DIRS, _is_component_file)
-    hook_count = _count_in_subdirs(feature_dir, HOOK_DIRS, _is_hook_file)
-    slice_count = _count_in_subdirs(feature_dir, SLICE_DIRS, _is_slice_file)
+    component_count = _count_matching_files(feature_dir, _is_component_file)
+    hook_count = _count_matching_files(feature_dir, _is_hook_file)
+    slice_count = _count_matching_files(feature_dir, _is_slice_file)
     api_endpoint_count = _count_in_subdirs(feature_dir, API_DIRS, _is_api_file)
 
     subfolders = sorted(
@@ -139,6 +139,36 @@ def _count_in_subdirs(
         for child in subdir.rglob("*"):
             if child.is_file() and file_filter(child):
                 count += 1
+    return count
+
+
+def _count_matching_files(feature_dir: Path, file_filter) -> int:
+    """Count all files matching a filter anywhere in a feature folder.
+
+    Skips test files, story files, type definition files, and dotfile dirs.
+    """
+    count = 0
+    for child in feature_dir.rglob("*"):
+        if not child.is_file():
+            continue
+        # Skip generated, vendored, and dotfile-prefixed paths
+        try:
+            rel_parts = child.relative_to(feature_dir).parts
+        except ValueError:
+            continue
+        if any(part.startswith(".") or part == "node_modules" for part in rel_parts):
+            continue
+        # Skip test, spec, story, and declaration files
+        name = child.name
+        if (
+            ".test." in name
+            or ".spec." in name
+            or ".stories." in name
+            or name.endswith(".d.ts")
+        ):
+            continue
+        if file_filter(child):
+            count += 1
     return count
 
 

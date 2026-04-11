@@ -213,6 +213,54 @@ def lint(project_path: str) -> None:
 
 
 @main.command()
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False))
+@click.argument("feature_name")
+def invariants(project_path: str, feature_name: str) -> None:
+    """Scan a feature for invariant candidates (warnings, magic numbers, TODOs)."""
+    from scarlet.analyzer.features import scan_features
+    from scarlet.analyzer.invariants import extract_invariants
+
+    pp = Path(project_path).resolve()
+    summaries = scan_features(pp)
+    target = next((s for s in summaries if s.name == feature_name), None)
+
+    if not target:
+        click.echo(f"Feature '{feature_name}' not found.", err=True)
+        sys.exit(1)
+
+    report = extract_invariants(Path(target.path))
+
+    if report.total_count == 0:
+        click.echo(f"No invariant candidates found in {feature_name}.")
+        return
+
+    click.echo(f"Invariant candidates for '{feature_name}':\n")
+
+    if report.warnings:
+        click.echo(f"Warnings ({len(report.warnings)}):")
+        for inv in report.warnings:
+            click.echo(f"  {inv.file}:{inv.line}  {inv.text}")
+        click.echo()
+
+    if report.intentional:
+        click.echo(f"Intentional callouts ({len(report.intentional)}):")
+        for inv in report.intentional:
+            click.echo(f"  {inv.file}:{inv.line}  {inv.text}")
+        click.echo()
+
+    if report.magic_numbers:
+        click.echo(f"Magic numbers ({len(report.magic_numbers)}):")
+        for inv in report.magic_numbers:
+            click.echo(f"  {inv.file}:{inv.line}  {inv.text}")
+        click.echo()
+
+    if report.todos:
+        click.echo(f"TODOs ({len(report.todos)}):")
+        for inv in report.todos:
+            click.echo(f"  {inv.file}:{inv.line}  {inv.text}")
+
+
+@main.command()
 def serve() -> None:
     """Start the Scarlet MCP server (stdio transport)."""
     from scarlet.server import mcp

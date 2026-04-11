@@ -49,6 +49,10 @@ class FeatureGraph:
     features: list[str] = field(default_factory=list)
     edges: list[tuple[str, str]] = field(default_factory=list)  # (from_feature, to_feature)
     deep_imports: list[tuple[str, str, str]] = field(default_factory=list)  # (from, to, file)
+    edge_files: dict[tuple[str, str], list[str]] = field(default_factory=dict)
+    """Per-edge file mapping: (from_feature, to_feature) → list of files in
+    `from_feature` that import from `to_feature`. Used by the CLAUDE.md
+    consumers section to show file-level granularity."""
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +86,7 @@ def build_feature_graph(project_path: Path) -> FeatureGraph:
 
     edges: set[tuple[str, str]] = set()
     deep_imports: list[tuple[str, str, str]] = []
+    edge_files: dict[tuple[str, str], list[str]] = {}
 
     for summary in summaries:
         feature_dir = Path(summary.path)
@@ -101,18 +106,26 @@ def build_feature_graph(project_path: Path) -> FeatureGraph:
                     import_path, source_file, feature_names, feature_paths, manifest.features_root
                 )
                 if target_feature and target_feature != summary.name:
-                    edges.add((summary.name, target_feature))
+                    edge = (summary.name, target_feature)
+                    edges.add(edge)
+
+                    # Track which files in the source feature import from the target
+                    file_str = str(source_file)
+                    edge_files.setdefault(edge, [])
+                    if file_str not in edge_files[edge]:
+                        edge_files[edge].append(file_str)
 
                     # Detect deep imports — paths that go past the feature barrel
                     if _is_deep_import(import_path, target_feature):
                         deep_imports.append(
-                            (summary.name, target_feature, str(source_file))
+                            (summary.name, target_feature, file_str)
                         )
 
     return FeatureGraph(
         features=feature_names,
         edges=sorted(edges),
         deep_imports=deep_imports,
+        edge_files=edge_files,
     )
 
 

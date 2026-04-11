@@ -84,6 +84,12 @@ REQUIRED_AUTO_SECTIONS = {"public_api", "key_files", "consumers", "see_also"}
 def lint_feature_claude_md(feature_path: Path) -> LintReport:
     """Lint a single feature's CLAUDE.md file.
 
+    Two modes:
+      - Scarlet-generated: full schema check (manual markers, auto sections,
+        public API freshness, file references)
+      - Legacy (no <!-- BEGIN MANUAL: --> markers): file reference check only,
+        since the file wasn't generated from Scarlet's template.
+
     Args:
         feature_path: Absolute path to the feature directory.
 
@@ -107,13 +113,14 @@ def lint_feature_claude_md(feature_path: Path) -> LintReport:
 
     content = claude_md_path.read_text(encoding="utf-8")
 
-    # Check required sections
-    issues.extend(_check_required_sections(content, feature_path.name, str(claude_md_path)))
+    is_scarlet_generated = "<!-- BEGIN MANUAL:" in content
 
-    # Check public API matches actual exports
-    issues.extend(_check_public_api_freshness(content, feature_path))
+    if is_scarlet_generated:
+        # Full schema check on Scarlet-generated files
+        issues.extend(_check_required_sections(content, feature_path.name, str(claude_md_path)))
+        issues.extend(_check_public_api_freshness(content, feature_path))
 
-    # Check referenced files still exist
+    # File reference check applies to all files
     issues.extend(_check_referenced_files(content, feature_path))
 
     return LintReport(feature=feature_path.name, issues=issues)
@@ -158,57 +165,120 @@ def _check_required_sections(content: str, feature: str, file: str) -> list[Lint
 
 
 def _check_public_api_freshness(content: str, feature_path: Path) -> list[LintIssue]:
-    """Check that the documented Public API matches actual exports."""
+    """Check that the documented Public API section matches actual exports.
+
+    Only checks symbols inside the auto-generated <!-- BEGIN AUTO: public_api -->
+    block. Symbols mentioned elsewhere in the document (vocabulary, gotchas,
+    code examples) are intentionally not checked, since they may legitimately
+    reference imports from other features or third-party libraries.
+    """
     issues: list[LintIssue] = []
 
-    # Extract documented symbols
-    documented = set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", content))
+    # Extract just the auto public_api block
+    block_match = re.search(
+        r"<!-- BEGIN AUTO: public_api -->(.*?)<!-- END AUTO: public_api -->",
+        content,
+        re.DOTALL,
+    )
+    if not block_match:
+        return issues
+
+    block_text = block_match.group(1)
+
+    # Extract documented symbols (capitalized or use-prefixed identifiers in backticks)
+    documented = set(re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", block_text))
+    documented = {
+        s for s in documented if s[0].isupper() or (s.startswith("use") and len(s) > 3 and s[3].isupper())
+    }
 
     # Extract actual exports
     metadata = extract_feature_metadata(feature_path)
     actual = {e.name for e in metadata.exports}
 
-    # Symbols documented but no longer exported
-    stale = documented & {s for s in documented if not s[0].islower() or s.startswith("use")} - actual
-    # Filter to plausible symbol names (not random backticked words)
-    stale = {s for s in stale if s[0].isupper() or s.startswith("use")}
-
-    for symbol in stale:
-        if symbol not in actual:
-            issues.append(
-                LintIssue(
-                    level=IssueLevel.INFO,
-                    code="stale_symbol_reference",
-                    message=f"`{symbol}` is documented but no longer in the feature's exports.",
-                    feature=feature_path.name,
-                    file=str(feature_path / "CLAUDE.md"),
-                )
+    stale = documented - actual
+    for symbol in sorted(stale):
+        issues.append(
+            LintIssue(
+                level=IssueLevel.WARNING,
+                code="stale_public_api",
+                message=(
+                    f"`{symbol}` is in the Public API section but no longer exported. "
+                    f"Run `scarlet describe {feature_path.name}` to refresh."
+                ),
+                feature=feature_path.name,
+                file=str(feature_path / "CLAUDE.md"),
             )
+        )
 
     return issues
 
 
+SOURCE_EXTENSIONS = {
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".py", ".md", ".mdc", ".css",
+    ".scss", ".sass", ".json", ".yml", ".yaml", ".toml", ".sql", ".sh",
+}
+
+# Path prefixes that indicate the file is project-root-relative, not feature-relative
+PROJECT_ROOT_PREFIXES = (
+    "frontend/", "backend/", "src/", "app/", "shared/", "shared-docs/",
+    "docs/", "store/", "features/", "components/", "pages/", "api/",
+    ".claude/", ".cursor/", ".github/", "tests/", "test/",
+)
+
+
 def _check_referenced_files(content: str, feature_path: Path) -> list[LintIssue]:
-    """Check that file paths mentioned in the CLAUDE.md still exist."""
+    """Check that file paths mentioned in the CLAUDE.md still exist.
+
+    Conservative checks to minimize false positives:
+      - Only flag paths whose extension is a known source/doc extension
+      - Skip paths that are clearly project-root-relative (start with
+        `frontend/`, `backend/`, `.claude/`, etc.)
+      - A reference is considered valid if either the exact relative path
+        resolves OR a file with the same basename exists anywhere in the
+        feature folder
+    """
     issues: list[LintIssue] = []
 
     # Match backticked paths that look like file references
-    file_pattern = re.compile(r"`([\w./-]+\.\w{2,4})`")
+    file_pattern = re.compile(r"`([\w./-]+\.\w{2,5})`")
+
+    # Build a set of all file basenames in the feature for fuzzy matching
+    all_files = {f.name for f in feature_path.rglob("*") if f.is_file()}
+
+    seen: set[str] = set()
     for match in file_pattern.finditer(content):
         path_str = match.group(1)
-        # Resolve relative to the feature root
+        if path_str in seen:
+            continue
+        seen.add(path_str)
+
+        # Filter to known source/doc file extensions
+        ext = "." + path_str.rsplit(".", 1)[-1].lower()
+        if ext not in SOURCE_EXTENSIONS:
+            continue
+
+        # Skip paths that are clearly project-root-relative
+        if path_str.startswith(PROJECT_ROOT_PREFIXES):
+            continue
+
+        # Try as a relative path under the feature root
         candidate = feature_path / path_str
-        if not candidate.exists():
-            # Could also be relative to project root — ignore those
-            if not path_str.startswith(("frontend/", "src/", "shared-docs/")):
-                issues.append(
-                    LintIssue(
-                        level=IssueLevel.INFO,
-                        code="broken_file_reference",
-                        message=f"Referenced file does not exist: `{path_str}`.",
-                        feature=feature_path.name,
-                        file=str(feature_path / "CLAUDE.md"),
-                    )
-                )
+        if candidate.exists():
+            continue
+
+        # Try matching by basename anywhere in the feature folder
+        basename = path_str.split("/")[-1]
+        if basename in all_files:
+            continue
+
+        issues.append(
+            LintIssue(
+                level=IssueLevel.INFO,
+                code="broken_file_reference",
+                message=f"Referenced file does not exist: `{path_str}`.",
+                feature=feature_path.name,
+                file=str(feature_path / "CLAUDE.md"),
+            )
+        )
 
     return issues
