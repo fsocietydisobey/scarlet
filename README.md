@@ -8,6 +8,29 @@ Built for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), but wor
 
 The dark cousin of [Séance](https://github.com/fsocietydisobey/seance): Séance retrieves knowledge from the dead code via vector search; Scarlet inscribes the names of every entity into a permanent record.
 
+## Why "Scarlet"
+
+Named for the **Scarlet Woman of Revelation 17** — the figure who sits on a beast "full of names of blasphemy" with a name written on her forehead and a cup full of mysteries in her hand. She is defined by the inscribed names she bears. A catalog walking around in human form.
+
+That maps directly onto what the tool does:
+
+- Catalogs named entities (components, hooks, slices, types, interfaces) from a codebase
+- Inscribes them into permanent records — per-feature `CLAUDE.md` files, barrel exports, symbol manifests
+- Surfaces what was hidden — gotchas, invariants, TODOs, deep imports that bypass barrels
+
+Other scarlet threads in scripture reinforce the metaphor:
+
+- **Isaiah 1:18** — *"though your sins be as scarlet…"*. Scarlet was the dye that couldn't be washed out; the stain that remained visible. Documentation fixes structure in the same way — makes the shape of a feature indelible so refactors can't silently erase it.
+- **Rahab's scarlet cord** (Joshua 2:18) — a visible marker placed on the house that should be preserved when everything around it is destroyed. Every generated `CLAUDE.md` is a scarlet cord: a feature tied to an inscription so it survives refactors that would otherwise erase its shape.
+
+There's also Hawthorne's **Scarlet Letter** — a public mark that fixes identity, making a person's defining characteristic impossible to ignore. Scarlet does the same to features: once their symbols are inscribed, their identity is legible to anyone (or anything) reading the record.
+
+And it pairs with its sibling tool in the ritual:
+
+> *To find what is hidden, hold a séance. To bind the names you find, give them to Scarlet.*
+
+[Séance](https://github.com/fsocietydisobey/seance) is the summoning. Scarlet is the scribe at the ritual — the one who takes down what comes through.
+
 ## What it does
 
 ```mermaid
