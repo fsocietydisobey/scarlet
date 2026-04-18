@@ -6,7 +6,7 @@ provided in `.scarlet.yml`. Sections marked with `<!-- BEGIN MANUAL -->`
 are refreshed every time.
 """
 
-DEFAULT_CLAUDE_MD_TEMPLATE = """# Feature: {feature_name}
+DEFAULT_CLAUDE_MD_TEMPLATE = """# Feature: {feature_display_name}
 
 <!-- BEGIN MANUAL: description -->
 {description_placeholder}

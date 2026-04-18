@@ -20,6 +20,7 @@ from scarlet.analyzer.metadata import (
     FeatureMetadata,
     extract_feature_metadata,
 )
+from scarlet.config import load_config
 from scarlet.generator.template import (
     DEFAULT_CLAUDE_MD_TEMPLATE,
     DEFAULT_DESCRIPTION_PLACEHOLDER,
@@ -101,11 +102,17 @@ def build_claude_md(
         existing = claude_md_path.read_text(encoding="utf-8")
         manual_sections = _extract_manual_sections(existing)
 
+    # Load project-level config and use its template if provided
+    config = load_config(project_path)
+    template = config.claude_md_template or DEFAULT_CLAUDE_MD_TEMPLATE
+
     content = _render_template(
         feature_name=feature_path.name,
+        feature_display_name=_to_display_name(feature_path.name),
         import_alias=import_alias,
         auto_sections=auto_sections,
         manual_sections=manual_sections,
+        template=template,
     )
 
     if write:
@@ -120,16 +127,47 @@ def build_claude_md(
     )
 
 
+def _to_display_name(slug: str) -> str:
+    """Convert a feature directory slug to a human-readable display name.
+
+    Examples:
+        'creation-flow' → 'Creation Flow'
+        'client_detail' → 'Client Detail'
+        'dashboard' → 'Dashboard'
+    """
+    return slug.replace("-", " ").replace("_", " ").title()
+
+
 def _render_template(
     feature_name: str,
     import_alias: str,
     auto_sections: dict[str, str],
     manual_sections: dict[str, str],
+    template: str = DEFAULT_CLAUDE_MD_TEMPLATE,
+    feature_display_name: str | None = None,
 ) -> str:
-    """Apply the template, filling auto sections and preserving manual content."""
-    # Start with the default template
-    content = DEFAULT_CLAUDE_MD_TEMPLATE.format(
+    """Apply the template, filling auto sections and preserving manual content.
+
+    `template` defaults to Scarlet's built-in template but can be overridden
+    per-project via `.scarlet.yml` (`claude_md_template:`). Custom templates
+    can include additional `<!-- BEGIN MANUAL: <key> -->` blocks for sections
+    like Architecture, Data and state, Permissions — any manual content
+    matching those keys in an existing CLAUDE.md is preserved on regenerate.
+
+    Template variables:
+        {feature_name}         — the directory slug (e.g., "creation-flow")
+                                 — use for CLI references: `scarlet describe <name>`
+        {feature_display_name} — title-cased human-readable name (e.g., "Creation Flow")
+                                 — use for the H1 heading
+        {import_alias}         — canonical import path
+        {description_placeholder}, {public_api}, {key_files},
+        {consumers}, {see_also}, {timestamp}
+    """
+    if feature_display_name is None:
+        feature_display_name = _to_display_name(feature_name)
+    content = template.format(
         feature_name=feature_name,
+        feature_display_name=feature_display_name,
         import_alias=import_alias,
         description_placeholder=manual_sections.get(
             "description", DEFAULT_DESCRIPTION_PLACEHOLDER
@@ -165,36 +203,62 @@ def _extract_manual_sections(content: str) -> dict[str, str]:
 
 
 def _render_public_api(metadata: FeatureMetadata) -> str:
-    """Render the Public API section from feature metadata."""
+    """Render the Public API section from feature metadata.
+
+    When multiple exports share the same name (e.g. a modern `Dashboard` and a
+    `DashboardLegacy/Dashboard`), the feature-relative path is shown instead of
+    the bare filename to disambiguate.
+    """
+    feature_path = Path(metadata.path)
     components = [e for e in metadata.exports if e.kind == "component"]
     hooks = [e for e in metadata.exports if e.kind == "hook"]
     slices = [e for e in metadata.exports if e.kind in ("slice", "api")]
+    constants = [e for e in metadata.exports if e.kind == "constant"]
     types = [e for e in metadata.exports if e.kind in ("interface", "type")]
+
+    name_counts: dict[str, int] = {}
+    for export in metadata.exports:
+        name_counts[export.name] = name_counts.get(export.name, 0) + 1
+
+    def _display_path(export: ExportedSymbol) -> str:
+        file = Path(export.file_path)
+        if name_counts.get(export.name, 0) > 1:
+            try:
+                return str(file.relative_to(feature_path))
+            except ValueError:
+                return file.name
+        return file.name
 
     lines: list[str] = []
 
     if components:
         lines.append("**Components:**")
-        for c in sorted(components, key=lambda e: e.name):
-            lines.append(f"- `{c.name}` — {Path(c.file_path).name}")
+        for c in sorted(components, key=lambda e: (e.name, e.file_path)):
+            lines.append(f"- `{c.name}` — {_display_path(c)}")
         lines.append("")
 
     if hooks:
         lines.append("**Hooks:**")
-        for h in sorted(hooks, key=lambda e: e.name):
-            lines.append(f"- `{h.name}()` — {Path(h.file_path).name}")
+        for h in sorted(hooks, key=lambda e: (e.name, e.file_path)):
+            lines.append(f"- `{h.name}()` — {_display_path(h)}")
         lines.append("")
 
     if slices:
         lines.append("**Store / API:**")
-        for s in sorted(slices, key=lambda e: e.name):
-            lines.append(f"- `{s.name}` — {Path(s.file_path).name}")
+        for s in sorted(slices, key=lambda e: (e.name, e.file_path)):
+            lines.append(f"- `{s.name}` — {_display_path(s)}")
+        lines.append("")
+
+    if constants:
+        lines.append("**Constants:**")
+        for c in sorted(constants, key=lambda e: (e.name, e.file_path)):
+            lines.append(f"- `{c.name}` — {_display_path(c)}")
         lines.append("")
 
     if types:
         lines.append("**Types:**")
-        for t in sorted(types, key=lambda e: e.name):
-            lines.append(f"- `{t.name}` — {Path(t.file_path).name}")
+        for t in sorted(types, key=lambda e: (e.name, e.file_path)):
+            lines.append(f"- `{t.name}` — {_display_path(t)}")
         lines.append("")
 
     if not lines:

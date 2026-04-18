@@ -170,6 +170,24 @@ def _extract_from_export_statement(
     declaration = node.child_by_field_name("declaration")
 
     if declaration is None:
+        # Handle `export default <identifier>;` — the name is exported by
+        # reference to a function/const/class declared elsewhere in the file.
+        # tree-sitter attaches the identifier as a direct child (not the
+        # `declaration` field) in this form.
+        if is_default:
+            for child in node.children:
+                if child.type == "identifier":
+                    name = child.text.decode()
+                    line = child.start_point[0] + 1
+                    return [
+                        _make_symbol(
+                            name,
+                            _classify_function(name),
+                            file_path,
+                            True,
+                            line,
+                        )
+                    ]
         return []
 
     line = declaration.start_point[0] + 1
@@ -222,11 +240,23 @@ def _lexical_name(node: Node) -> str | None:
 
 
 def _classify_function(name: str) -> str:
-    """Classify a function/constant by its name (React conventions)."""
+    """Classify a function/constant by its name (React conventions).
+
+    Precedence:
+      1. `use*` hook pattern → hook
+      2. SCREAMING_SNAKE_CASE → constant (e.g. `DASHBOARD_QUERY_STORAGE_KEY`,
+         `QUOTES_FILTER_COLUMNS`, `CREATION_STEP`). A name is SCREAMING_SNAKE_CASE
+         if stripping underscores/digits/$-signs leaves only uppercase letters.
+      3. PascalCase (first char uppercase, not all-upper) → component
+      4. Otherwise → function
+    """
     if not name:
         return "function"
     if name.startswith("use") and len(name) > 3 and name[3].isupper():
         return "hook"
+    alpha_only = "".join(c for c in name if c.isalpha())
+    if alpha_only and alpha_only.isupper():
+        return "constant"
     if name[0].isupper():
         return "component"
     return "function"
